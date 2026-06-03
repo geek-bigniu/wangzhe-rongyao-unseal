@@ -250,6 +250,9 @@ def main(submit_final=True):
 
         cached_answer = get_cached_answer(answer_cache, page_cfg, answers)
         if cached_answer:
+            if not submit_final:
+                print(f"命中本地答案缓存，批量模式不提交答案: {cached_answer}")
+                return learned_count
             print(f"命中本地答案缓存，直接提交: {cached_answer}")
             response = getInfo(seed, cached_answer)
             if response is None:
