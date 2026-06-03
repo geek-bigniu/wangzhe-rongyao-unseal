@@ -5,9 +5,12 @@ from itertools import combinations
 import urllib.parse
 import json
 import argparse
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 ANSWER_CACHE_PATH = Path(__file__).with_name("answer_cache.json")
+CACHE_LOCK = threading.Lock()
 REQUEST_TIMEOUT = 15
 MAX_REQUEST_RETRIES = 3
 RETRY_DELAY_SECONDS = 1.5
@@ -183,16 +186,21 @@ def record_answer(cache, page_cfg, answer):
     if not key:
         return False
 
-    old_answer = str(cache.get(key, {}).get("answer", ""))
-    changed = old_answer != str(answer)
-    cache[key] = {
+    entry = {
         "answer": str(answer),
         "question_title": normalize_text(page_cfg.get("question_title", "")),
         "question_type": page_cfg.get("question_type", 1),
         "options": extract_options(page_cfg),
         "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
-    save_answer_cache(cache)
+    with CACHE_LOCK:
+        latest_cache = load_answer_cache()
+        old_answer = str(latest_cache.get(key, {}).get("answer", ""))
+        changed = old_answer != str(answer)
+        latest_cache[key] = entry
+        save_answer_cache(latest_cache)
+        cache.clear()
+        cache.update(latest_cache)
 
     if old_answer and old_answer != str(answer):
         print(f"已更新本地答案缓存: {old_answer} -> {answer}")
@@ -330,11 +338,45 @@ def build_bank(rounds=10, round_delay=2.0, submit_final=False):
     print(f"批量爆破结束，累计新增或更新: {total_learned}")
 
 
+def run_bank_round(round_no, rounds, submit_final):
+    print(f"\n=== 批量爆破题库 {round_no}/{rounds} ===")
+    learned_count = main(submit_final=submit_final) or 0
+    print(f"第 {round_no} 轮新增或更新: {learned_count}")
+    return learned_count
+
+
+def build_bank(rounds=10, round_delay=2.0, submit_final=False, workers=1):
+    total_learned = 0
+    workers = max(1, min(workers, rounds))
+
+    if workers == 1:
+        for round_no in range(1, rounds + 1):
+            learned_count = run_bank_round(round_no, rounds, submit_final)
+            total_learned += learned_count
+            print(f"累计新增或更新: {total_learned}")
+            if round_no < rounds and round_delay > 0:
+                time.sleep(round_delay)
+    else:
+        print(f"启动多线程批量爆破: rounds={rounds}, workers={workers}")
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = []
+            for round_no in range(1, rounds + 1):
+                futures.append(executor.submit(run_bank_round, round_no, rounds, submit_final))
+                if round_no < rounds and round_delay > 0:
+                    time.sleep(round_delay)
+            for future in as_completed(futures):
+                total_learned += future.result()
+                print(f"累计新增或更新: {total_learned}")
+
+    print(f"批量爆破结束，累计新增或更新: {total_learned}")
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="王者荣耀答题脚本")
     parser.add_argument("--build-bank", action="store_true", help="批量爆破题库并写入 answer_cache.json")
     parser.add_argument("--rounds", type=int, default=10, help="批量爆破轮数，默认 10")
     parser.add_argument("--round-delay", type=float, default=2.0, help="每轮之间的等待秒数，默认 2")
+    parser.add_argument("--workers", type=int, default=1, help="批量爆破线程数，默认 1")
     parser.add_argument("--submit-final", action="store_true", help="批量模式下每轮也提交 verify/finish")
     return parser.parse_args()
 
@@ -414,6 +456,11 @@ def finishTask(game_id):
 if __name__ == "__main__":
     args = parse_args()
     if args.build_bank:
-        build_bank(rounds=args.rounds, round_delay=args.round_delay, submit_final=args.submit_final)
+        build_bank(
+            rounds=args.rounds,
+            round_delay=args.round_delay,
+            submit_final=args.submit_final,
+            workers=args.workers,
+        )
     else:
         main()
