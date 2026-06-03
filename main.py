@@ -70,16 +70,16 @@ def getInfo(seed, answer=""):
     return response
 
 
-def generate_answers(is_multiple_choice):
+def generate_answers(is_multiple_choice, option_count=4):
     """生成所有可能的答案组合"""
-    options = [1, 2, 3, 4]
+    options = list(range(1, option_count + 1))
     if not is_multiple_choice:
         # 单选题：返回 1, 2, 3, 4
         return [str(i) for i in options]
     else:
         # 多选题：返回所有组合，例如 1, 1|2, 1|2|3, 1|2|3|4 等
         answers = []
-        for r in range(1, len(options) + 1):
+        for r in range(2, len(options) + 1):
             for combo in combinations(options, r):
                 answers.append("|".join(str(i) for i in combo))
         return answers
@@ -235,9 +235,10 @@ def main():
         print(f"第 {question_no}/{question_total} 题: {question_title}")
         # 判断是否为多选题
         is_multiple_choice = question_type == 2
+        option_count = len(page_cfg.get("question_answers", [])) or 4
 
         # 生成答案组合
-        answers = generate_answers(is_multiple_choice)
+        answers = generate_answers(is_multiple_choice, option_count)
         print(f"答案组合: {answers}")
         last_answer = ""
 
