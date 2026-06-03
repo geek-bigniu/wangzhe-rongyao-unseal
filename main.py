@@ -4,6 +4,7 @@ import requests
 from itertools import combinations
 import urllib.parse
 import json
+import argparse
 from pathlib import Path
 
 ANSWER_CACHE_PATH = Path(__file__).with_name("answer_cache.json")
@@ -180,9 +181,10 @@ def get_cached_answer(cache, page_cfg, valid_answers):
 def record_answer(cache, page_cfg, answer):
     key = build_question_key(page_cfg)
     if not key:
-        return
+        return False
 
     old_answer = str(cache.get(key, {}).get("answer", ""))
+    changed = old_answer != str(answer)
     cache[key] = {
         "answer": str(answer),
         "question_title": normalize_text(page_cfg.get("question_title", "")),
@@ -198,8 +200,12 @@ def record_answer(cache, page_cfg, answer):
         print(f"已记录本地答案缓存: {answer}")
 
 
-def main():
+    return changed
+
+
+def main(submit_final=True):
     answer_cache = load_answer_cache()
+    learned_count = 0
     res = getTaskInfo()
     if not res:
         print("获取任务信息失败，退出")
@@ -282,7 +288,8 @@ def main():
             if 'data' in res and res['data']['seed'] != seed:
                 last_answer = answer
                 print(f"第 {question_no} 题答对了，答案: {answer}")
-                record_answer(answer_cache, page_cfg, answer)
+                if record_answer(answer_cache, page_cfg, answer):
+                    learned_count += 1
                 seed = res['data']['seed']  # 更新 seed
                 break
             else:
@@ -297,12 +304,36 @@ def main():
         if question_no >= question_total:
             print("已完成所有题目！")
             break
+    if not submit_final:
+        return learned_count
     res = verify_task(origin_seed, 9, last_answer)
     print(res.json() if res is not None else "verify task 9 request failed")
     res = verify_task(origin_seed, 10, last_answer)
     print(res.json() if res is not None else "verify task 10 request failed")
     res = finishTask(2577)
     print(res)
+    return learned_count
+
+
+def build_bank(rounds=10, round_delay=2.0, submit_final=False):
+    total_learned = 0
+    for round_no in range(1, rounds + 1):
+        print(f"\n=== 批量爆破题库 {round_no}/{rounds} ===")
+        learned_count = main(submit_final=submit_final) or 0
+        total_learned += learned_count
+        print(f"本轮新增或更新: {learned_count}，累计新增或更新: {total_learned}")
+        if round_no < rounds and round_delay > 0:
+            time.sleep(round_delay)
+    print(f"批量爆破结束，累计新增或更新: {total_learned}")
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="王者荣耀答题脚本")
+    parser.add_argument("--build-bank", action="store_true", help="批量爆破题库并写入 answer_cache.json")
+    parser.add_argument("--rounds", type=int, default=10, help="批量爆破轮数，默认 10")
+    parser.add_argument("--round-delay", type=float, default=2.0, help="每轮之间的等待秒数，默认 2")
+    parser.add_argument("--submit-final", action="store_true", help="批量模式下每轮也提交 verify/finish")
+    return parser.parse_args()
 
 # F04E3AEC17E8E132D2DCD2F8FC558C53ACE2B401169AF2609FC9D6E58AFD07B710665408F82E37DAE035B150CDA1964850E363C7F8A827DBC419D7C2E976AC2F17F533BD4B1845070B9F7FCA49000F60A471A1C9B36DE00EF9F5ABC7C76DAFF0365015DB5C06FD153DC16755D258BA8A97B49112AB259F7E0EEA5F7F10FE92393F3C44EC69256C65DB7764C850D5FA20BF3257F355754E17E89F190F45D95D8A17E4768B4AD98EFB71A3721D3D5E2196DE757D73349DBCF64FD4564170CCA8C8D054767D16BA97EE4E94D7C477B2B15F86CF850B83645E025F31B47F8A15D8C1DD0B47CB5884AB3A7A21FBFF43932F660B4B08CEC3C64693E00C6D79B207474F541F5377413043A3F2A49CE4FB8431A20385210F76A2C8B340BF834470A9E3836FBBF1D42A4362FD10128CB68C0E46422E7420F55E1AE2B973825B43C2D7DF01DEC82079620C2D175F87EA7C9D063FB2031BC491F0884077330D9F859227721E8CD5B6B40211FACC09A94F220D4A4C9E0366C31E40F12E362C4D99B1C14FEC2AE3E67322BA0AF78CB8642DF741C05249734F43E55792866A29AC807C19DF19E7A1051706886C20F9B9E8AD29A359B9D9FF4204419AB5FF501A5CC48DFC7A0180F9DE301E632A0A28F7E55494EE183890C39F0DA95DB52FD8C9C5A5710A770D3C55D1FC7FBF0ED03687E82697A9449C4521ED82B5CEC7AE1181249F7B77FAC241117CF3DA366525802C09FBFB57E5B98DD197353F4232588CDF6DA8FDA953A17FD2176A43801786AA0AB67EED142CE1A8086B45B3A37E1428E4C5BEEEC72BA382B1B4239562F4B61DCECE8957910BB2A7602051C509C63630B5AE0FA5549BA0A4BF67B77A434C3BFBAD5D2C17D82128BFC59B08CE66C2FD28B6514067B242FC93AEB6680FB07B0D4C9B63FD0F84A83AB91E5E43A5E64FF77A05D8A004583D76518677007A90A379BF2038BAFFE59E597A9D7758F62A1441819D2685C231D22F42286F4A6A999452168F43526CC491047A
 # F04E3AEC17E8E132D2DCD2F8FC558C53ACE2B401169AF2609FC9D6E58AFD07B710665408F82E37DAE035B150CDA1964850E363C7F8A827DBC419D7C2E976AC2F17F533BD4B1845070B9F7FCA49000F60A471A1C9B36DE00EF9F5ABC7C76DAFF0365015DB5C06FD153DC16755D258BA8A97B49112AB259F7E0EEA5F7F10FE92393F3C44EC69256C65DB7764C850D5FA20BF3257F355754E17E89F190F45D95D8A17E4768B4AD98EFB71A3721D3D5E2196DE757D73349DBCF64FD4564170CCA8C8D054767D16BA97EE4E94D7C477B2B15F86CF850B83645E025F31B47F8A15D8C1DD0B47CB5884AB3A7A21FBFF43932F660B4B08CEC3C64693E00C6D79B207474F541F5377413043A3F2A49CE4FB8431A20385210F76A2C8B340BF834470A9E3836FBBF1D42A4362FD10128CB68C0E46422E7420F55E1AE2B973825B43C2D7DF01DEC82079620C2D175F87EA7C9D063FB2031BC491F0884077330D9F859227721E8CD5B6B40211FACC09A94F220D4A4C9E0366C31E40F12E362C4D99B1C14FEC2AE3E67322BA0AF78CB8642DF741C05249734F43E55792866A29AC807C19DF19E7A1051706886C20F9B9E8AD29A359B9D9FF4204419AB5FF501A5CC48DFC7A0180F9DE301E632A0A28F7E55494EE183890C39F0DA95DB52FD8C9C5A5710A770D3C55D1FC7FBF0ED03687E82697A9449C4521ED82B5CEC7AE1181249F7B77FAC241117CF3DA366525802C09FBFB57E5B98DD197353F4232588CDF6DA8FDA953A17FD2176A43801786AA0AB67EED142CE1A8086B45B3A37E1428E4C5BEEEC72BA382B1B4239562F4B61DCECE8957910BB2A7602051C509C63630B5AE0FA5549BA0A4BF67B77A434C3BFBAD5D2C17D82128BFC59B08CE66C2FD28B6514067B242FC93AEB6680FB07B0D4C9B63FD0F84A83AB91E5E43A5E64FF77A05D8A004583D76511FB2A1F447A15AB27B85E46D808978685AA3BF32A786693B4DAB63A793B232FC094392EE972108F2599C8685C14208B4
@@ -378,4 +409,8 @@ def finishTask(game_id):
 
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    if args.build_bank:
+        build_bank(rounds=args.rounds, round_delay=args.round_delay, submit_final=args.submit_final)
+    else:
+        main()
