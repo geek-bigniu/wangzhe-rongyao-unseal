@@ -143,7 +143,10 @@ def build_question_key(page_cfg):
 
 
 def get_answer_texts(page_cfg, answer):
-    options = extract_options(page_cfg)
+    return get_answer_texts_from_options(extract_options(page_cfg), answer)
+
+
+def get_answer_texts_from_options(options, answer):
     answer_texts = []
     for index_text in str(answer).split("|"):
         try:
@@ -156,10 +159,46 @@ def get_answer_texts(page_cfg, answer):
 
 
 def build_option_map(page_cfg):
+    return build_option_map_from_options(extract_options(page_cfg))
+
+
+def build_option_map_from_options(options):
     return {
         str(index): option_text
-        for index, option_text in enumerate(extract_options(page_cfg), start=1)
+        for index, option_text in enumerate(options, start=1)
     }
+
+
+def migrate_answer_cache(cache):
+    changed = False
+    for entry in cache.values():
+        if not isinstance(entry, dict):
+            continue
+
+        options = entry.get("option_texts") or entry.get("options") or []
+        answer = str(entry.get("answer", ""))
+        if not isinstance(options, list):
+            continue
+
+        if "option_texts" not in entry:
+            entry["option_texts"] = options
+            changed = True
+        if "option_map" not in entry:
+            entry["option_map"] = build_option_map_from_options(options)
+            changed = True
+        if "answer_texts" not in entry:
+            entry["answer_texts"] = get_answer_texts_from_options(options, answer)
+            changed = True
+
+    return changed
+
+
+def migrate_answer_cache_file():
+    with CACHE_LOCK:
+        cache = load_answer_cache()
+        if migrate_answer_cache(cache):
+            save_answer_cache(cache)
+            print("已迁移旧题库缓存，补全 answer_texts / option_texts / option_map")
 
 
 def load_answer_cache():
@@ -476,6 +515,7 @@ def finishTask(game_id):
 
 if __name__ == "__main__":
     args = parse_args()
+    migrate_answer_cache_file()
     if args.build_bank:
         build_bank(
             rounds=args.rounds,
