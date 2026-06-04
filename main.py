@@ -142,6 +142,19 @@ def build_question_key(page_cfg):
     return question_title
 
 
+def get_answer_texts(page_cfg, answer):
+    options = extract_options(page_cfg)
+    answer_texts = []
+    for index_text in str(answer).split("|"):
+        try:
+            option_index = int(index_text) - 1
+        except ValueError:
+            continue
+        if 0 <= option_index < len(options):
+            answer_texts.append(options[option_index])
+    return answer_texts
+
+
 def load_answer_cache():
     if not ANSWER_CACHE_PATH.exists():
         return {}
@@ -188,6 +201,7 @@ def record_answer(cache, page_cfg, answer):
 
     entry = {
         "answer": str(answer),
+        "answer_texts": get_answer_texts(page_cfg, answer),
         "question_title": normalize_text(page_cfg.get("question_title", "")),
         "question_type": page_cfg.get("question_type", 1),
         "options": extract_options(page_cfg),
