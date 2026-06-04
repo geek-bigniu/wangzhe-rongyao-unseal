@@ -13,18 +13,35 @@ def strip_url_tail(url):
     return url.split("?", 1)[0].split("#", 1)[0].lower()
 
 
-def media_refs(text, label):
-    refs = []
-    for index, url in enumerate(URL_RE.findall(str(text or "")), start=1):
-        clean_url = strip_url_tail(url)
+def is_image_url(url):
+    return strip_url_tail(url).endswith(IMAGE_EXTENSIONS)
+
+
+def is_video_url(url):
+    return strip_url_tail(url).endswith(VIDEO_EXTENSIONS)
+
+
+def render_value(text, label):
+    text = str(text or "").strip()
+    urls = URL_RE.findall(text)
+    if not urls:
+        return [text] if text else []
+
+    rendered = []
+    remaining_text = URL_RE.sub("", text).strip()
+    if remaining_text:
+        rendered.append(remaining_text)
+
+    for index, url in enumerate(urls, start=1):
         media_label = f"{label}{index}"
-        if clean_url.endswith(IMAGE_EXTENSIONS):
-            refs.append(f"![{media_label}]({url})")
-        elif clean_url.endswith(VIDEO_EXTENSIONS):
-            refs.append(f'<video controls src="{url}" title="{media_label}"></video>')
+        if is_image_url(url):
+            rendered.append(f"![{media_label}]({url})")
+        elif is_video_url(url):
+            rendered.append(f'<video controls src="{url}" title="{media_label}"></video>')
         else:
-            refs.append(f"[{media_label}]({url})")
-    return refs
+            rendered.append(f"[{media_label}]({url})")
+
+    return rendered
 
 
 def question_type_label(question_type):
@@ -47,13 +64,19 @@ def normalize_entry(entry):
     option_map = entry.get("option_map") or {
         str(index): option for index, option in enumerate(options, start=1)
     }
-    return options, answer, answer_texts, option_map
+    return answer_texts, option_map
+
+
+def append_rendered_block(lines, rendered_items, indent=""):
+    if not rendered_items:
+        return
+    lines.extend(f"{indent}{item}" for item in rendered_items)
 
 
 def render_entry(index, entry):
     title = entry.get("question_title", "").strip() or f"未命名题目 {index}"
     question_type = question_type_label(entry.get("question_type", 1))
-    options, answer, answer_texts, option_map = normalize_entry(entry)
+    answer_texts, option_map = normalize_entry(entry)
 
     lines = [
         f"## {index}. {title}",
@@ -61,24 +84,30 @@ def render_entry(index, entry):
         f"**题型：{question_type}**",
     ]
 
-    question_media = media_refs(title, f"题目媒体{index}-")
-    if question_media:
+    title_media = render_value(title, f"题目媒体{index}-")
+    if len(title_media) > 1 or (title_media and title_media[0] != title):
         lines.extend(["", "### 题目媒体", ""])
-        lines.extend(question_media)
+        append_rendered_block(lines, title_media)
 
     lines.extend(["", "### 选项", ""])
     for option_index, option_text in option_map.items():
-        lines.append(f"{option_index}. {option_text}")
-        for media in media_refs(option_text, f"选项{index}-{option_index}-"):
-            lines.append(f"   {media}")
+        rendered_option = render_value(option_text, f"选项{index}-{option_index}-")
+        if len(rendered_option) == 1:
+            lines.append(f"{option_index}. {rendered_option[0]}")
+        else:
+            lines.append(f"{option_index}.")
+            append_rendered_block(lines, rendered_option, indent="   ")
 
-    lines.extend([
-        "",
-        "### 答案",
-        "",
-        f"{', '.join(answer_texts) if answer_texts else '未解析'}",
-        "",
-    ])
+    lines.extend(["", "### 答案", ""])
+    rendered_answers = []
+    for answer_index, answer_text in enumerate(answer_texts, start=1):
+        rendered_answers.extend(render_value(answer_text, f"答案{index}-{answer_index}-"))
+    if rendered_answers:
+        append_rendered_block(lines, rendered_answers)
+    else:
+        lines.append("未解析")
+
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -87,11 +116,17 @@ def render_markdown(cache, limit=None):
     if limit:
         entries = entries[:limit]
 
+    single_count = sum(1 for entry in entries if entry.get("question_type", 1) != 2)
+    multiple_count = sum(1 for entry in entries if entry.get("question_type", 1) == 2)
+
     lines = [
         "# 王者荣耀答题题库模板",
         "",
+        f"- 题目总数: {len(entries)}",
+        f"- 单选: {single_count}",
+        f"- 多选: {multiple_count}",
+        "",
     ]
-
     for index, entry in enumerate(entries, start=1):
         lines.append(render_entry(index, entry))
 
