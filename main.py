@@ -155,6 +155,13 @@ def get_answer_texts(page_cfg, answer):
     return answer_texts
 
 
+def build_option_map(page_cfg):
+    return {
+        str(index): option_text
+        for index, option_text in enumerate(extract_options(page_cfg), start=1)
+    }
+
+
 def load_answer_cache():
     if not ANSWER_CACHE_PATH.exists():
         return {}
@@ -199,12 +206,15 @@ def record_answer(cache, page_cfg, answer):
     if not key:
         return False
 
+    option_texts = extract_options(page_cfg)
     entry = {
         "answer": str(answer),
         "answer_texts": get_answer_texts(page_cfg, answer),
         "question_title": normalize_text(page_cfg.get("question_title", "")),
         "question_type": page_cfg.get("question_type", 1),
-        "options": extract_options(page_cfg),
+        "options": option_texts,
+        "option_texts": option_texts,
+        "option_map": build_option_map(page_cfg),
         "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
     with CACHE_LOCK:
