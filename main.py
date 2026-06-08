@@ -27,6 +27,7 @@ AGREE_TASK_ID = "10"
 SCENE_INFO = require_env("scene_info")
 COOKIE = require_env("cookie")
 
+
 def get_cookie_value(name):
     for item in COOKIE.split(";"):
         key, separator, value = item.strip().partition("=")
@@ -41,7 +42,7 @@ if not USER_ID:
 
 
 headers = {
-    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.56(0x1800383b) NetType/WIFI Language/zh_CN miniProgram/wx39542b01b40b6909",
+    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 26_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.71(0x18004730) NetType/WIFI Language/zh_CN miniProgram/wx39542b01b40b6909",
     "Accept": "application/json, text/plain, */*",
     "Sec-Fetch-Mode": "cors",
     "Accept-Language": "zh-CN,zh-Hans;q=0.9",
@@ -49,8 +50,9 @@ headers = {
     "Sec-Fetch-Site": "same-origin",
     "Referer": f"https://wx.gamesafe.qq.com/static/proxy/intervention/index.html?gameId={GAME_ID}&sceneInfo={SCENE_INFO}&taskId={TASK_ID}&op_type=get_question",
     "Sec-Fetch-Dest": "empty",
-    "Cookie": COOKIE,
 }
+
+
 def request_with_retry(method, url, **kwargs):
     kwargs.setdefault("timeout", REQUEST_TIMEOUT)
 
@@ -296,6 +298,9 @@ def main(submit_final=True):
         print("获取任务信息失败，退出")
         return
     print(res)
+    if res.get("err") != 0 or not isinstance(res.get("data"), dict) or not res["data"].get("seed"):
+        print(f"get_task_info returned invalid data, stop: {res}")
+        return
     origin_seed = res['data']['seed']
     seed = origin_seed
     # 获取当前题目信息（使用默认答案 0 以获取题目）
@@ -318,6 +323,9 @@ def main(submit_final=True):
             return
 
         # 获取题目信息
+        if not isinstance(data, dict):
+            print(f"get_seed_info returned invalid data, stop: {res}")
+            return
         page_cfg = data.get("page_cfg", {})
         question_no = page_cfg.get("question_no", 0)
         question_total = page_cfg.get("question_total", 0)
