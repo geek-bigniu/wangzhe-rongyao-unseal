@@ -287,13 +287,52 @@ def save_answer_cache(cache):
     tmp_path.replace(ANSWER_CACHE_PATH)
 
 
-def get_cached_answer(cache, page_cfg, valid_answers):
+def find_cached_entry(cache, page_cfg):
     key = build_question_key(page_cfg)
     entry = cache.get(key)
+    if entry:
+        return entry
+
+    question_title = normalize_text(page_cfg.get("question_title", ""))
+    if not question_title:
+        return None
+
+    for cached_entry in cache.values():
+        if not isinstance(cached_entry, dict):
+            continue
+        if normalize_text(cached_entry.get("question_title", "")) == question_title:
+            return cached_entry
+    return None
+
+
+def remap_cached_answer(entry, page_cfg):
+    answer_texts = entry.get("answer_texts") or []
+    if not answer_texts:
+        return str(entry.get("answer", ""))
+
+    current_option_map = build_option_map(page_cfg)
+    text_to_index = {
+        normalize_text(option_text): index
+        for index, option_text in current_option_map.items()
+    }
+    remapped = []
+    for answer_text in answer_texts:
+        option_index = text_to_index.get(normalize_text(answer_text))
+        if not option_index:
+            return None
+        remapped.append(option_index)
+    return "|".join(remapped)
+
+
+def get_cached_answer(cache, page_cfg, valid_answers):
+    entry = find_cached_entry(cache, page_cfg)
     if not entry:
         return None
 
-    answer = str(entry.get("answer", ""))
+    answer = remap_cached_answer(entry, page_cfg)
+    if not answer:
+        print("命中缓存但无法按当前选项映射答案文字，忽略")
+        return None
     if answer not in valid_answers:
         print(f"命中缓存但答案不适用于当前题型，忽略: {answer}")
         return None
@@ -306,6 +345,7 @@ def record_answer(cache, page_cfg, answer):
     if not key:
         return False
 
+    title_key = normalize_text(page_cfg.get("question_title", ""))
     option_texts = extract_options(page_cfg)
     entry = {
         "answer": str(answer),
@@ -320,8 +360,12 @@ def record_answer(cache, page_cfg, answer):
     with CACHE_LOCK:
         latest_cache = load_answer_cache()
         old_answer = str(latest_cache.get(key, {}).get("answer", ""))
+        if not old_answer and title_key:
+            old_answer = str(latest_cache.get(title_key, {}).get("answer", ""))
         changed = old_answer != str(answer)
         latest_cache[key] = entry
+        if title_key:
+            latest_cache[title_key] = entry
         save_answer_cache(latest_cache)
         cache.clear()
         cache.update(latest_cache)
