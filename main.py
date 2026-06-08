@@ -50,6 +50,7 @@ headers = {
     "Sec-Fetch-Site": "same-origin",
     "Referer": f"https://wx.gamesafe.qq.com/static/proxy/intervention/index.html?gameId={GAME_ID}&sceneInfo={SCENE_INFO}&taskId={TASK_ID}&op_type=get_question",
     "Sec-Fetch-Dest": "empty",
+    "Cookie": COOKIE
 }
 
 
@@ -103,6 +104,50 @@ def generate_answers(is_multiple_choice, option_count=4):
             for combo in combinations(options, r):
                 answers.append("|".join(str(i) for i in combo))
         return answers
+
+
+def try_answer(seed, answer):
+    response = getInfo(seed, answer)
+    if response is None:
+        return answer, None, "request_failed"
+    if response.status_code != 200:
+        return answer, None, f"status_{response.status_code}"
+
+    try:
+        result = response.json()
+    except ValueError:
+        return answer, None, "invalid_json"
+
+    data = result.get("data")
+    if isinstance(data, dict) and data.get("seed") and data.get("seed") != seed:
+        return answer, result, "matched"
+    return answer, result, "wrong"
+
+
+def brute_force_answers_parallel(seed, answers):
+    executor = ThreadPoolExecutor(max_workers=max(1, len(answers)))
+    futures = {
+        executor.submit(try_answer, seed, answer): answer
+        for answer in answers
+    }
+
+    try:
+        for future in as_completed(futures):
+            answer, result, status = future.result()
+            if status == "matched":
+                for pending in futures:
+                    if pending is not future:
+                        pending.cancel()
+                return answer, result
+
+            if status == "wrong":
+                print(f"答案 {answer} 错误")
+            else:
+                print(f"答案 {answer} 提交失败: {status}")
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+    return None, None
 
 
 def normalize_text(text):
@@ -364,29 +409,15 @@ def main(submit_final=True):
             else:
                 print(f"提交缓存答案失败，状态码: {response.status_code}，回退枚举")
 
-        # 枚举答案
-        for answer in answers:
-            print(f"尝试答案: {answer}")
-            response = getInfo(seed, answer)
-            time.sleep(TRY_ANSWER_DELAY_SECONDS)
-            if response is None:
-                print(f"提交答案 {answer} 请求失败，继续尝试下一个")
-                continue
-            if response.status_code != 200:
-                print(f"提交答案失败，状态码: {response.status_code}")
-                continue
-
-            res = response.json()
-            # print(res)
-            if 'data' in res and res['data']['seed'] != seed:
-                last_answer = answer
-                print(f"第 {question_no} 题答对了，答案: {answer}")
-                if record_answer(answer_cache, page_cfg, answer):
-                    learned_count += 1
-                seed = res['data']['seed']  # 更新 seed
-                break
-            else:
-                print(f"答案 {answer} 错误")
+        # 并发枚举答案，命中下一题 seed 后立即采用该结果
+        print(f"并发尝试答案: {answers}")
+        answer, res = brute_force_answers_parallel(seed, answers)
+        if answer and res:
+            last_answer = answer
+            print(f"第 {question_no} 题答对了，答案: {answer}")
+            if record_answer(answer_cache, page_cfg, answer):
+                learned_count += 1
+            seed = res['data']['seed']  # 更新 seed
         else:
             print(f"第 {question_no} 题无正确答案，退出")
             break
